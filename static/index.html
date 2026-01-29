@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NCP 서버 관리 대시보드</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+
+        header {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .status-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+
+        .card h3 {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            margin-bottom: 10px;
+        }
+
+        .card .value { font-size: 1.5rem; font-weight: bold; }
+
+        .status-badge {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .status-badge.work { background: linear-gradient(90deg, #00c853, #00e676); color: #000; }
+        .status-badge.off { background: linear-gradient(90deg, #ff5252, #ff1744); color: #fff; }
+
+        .server-section {
+            background: rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-left: 3px solid #00d4ff;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .section-header h2 {
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .server-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 10px;
+            margin-bottom: 10px;
+            transition: background 0.3s;
+        }
+
+        .server-item:hover { background: rgba(255,255,255,0.08); }
+
+        .server-info { flex: 1; }
+        .server-name { font-size: 1rem; font-weight: 600; margin-bottom: 2px; }
+        .server-id { font-size: 0.8rem; color: #888; font-family: monospace; }
+
+        .server-status { display: flex; align-items: center; gap: 10px; }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.running { background: #00e676; box-shadow: 0 0 8px #00e676; }
+        .status-dot.stopped { background: #ff5252; box-shadow: 0 0 8px #ff5252; }
+        .status-dot.pending { background: #ffc107; box-shadow: 0 0 8px #ffc107; }
+
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        .btn {
+            padding: 8px 14px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.8rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn:hover { transform: scale(1.05); }
+        .btn:active { transform: scale(0.95); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        .btn-start { background: linear-gradient(90deg, #00c853, #00e676); color: #000; }
+        .btn-stop { background: linear-gradient(90deg, #ff5252, #ff1744); color: #fff; }
+        .btn-refresh { background: linear-gradient(90deg, #2196f3, #00bcd4); color: #fff; }
+        .btn-sync { background: linear-gradient(90deg, #6200ea, #3700b3); color: #fff; }
+
+        .btn-group { display: flex; gap: 8px; }
+
+        /* 커스텀 툴팁 스타일 */
+        .tooltip-container {
+            position: relative;
+            display: inline-block;
+        }
+
+        .custom-tooltip {
+            visibility: hidden;
+            width: 200px;
+            background-color: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            text-align: center;
+            border-radius: 8px;
+            padding: 10px;
+            position: absolute;
+            z-index: 100;
+            bottom: 125%; /* 버튼 위로 위치 */
+            left: 50%;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: opacity 0.3s, transform 0.3s;
+            font-size: 0.75rem;
+            line-height: 1.4;
+            pointer-events: none;
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+
+        .custom-tooltip::after {
+            content: "";
+            position: absolute;
+            top: 100%; /* 툴팁 아래쪽에 화살표 */
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: rgba(0, 0, 0, 0.9) transparent transparent transparent;
+        }
+
+        .tooltip-container:hover .custom-tooltip {
+            visibility: visible;
+            opacity: 1;
+            transform: translateX(-50%) translateY(-5px);
+        }
+
+        .loading { text-align: center; padding: 30px; color: #888; }
+
+        .spinner {
+            width: 30px;
+            height: 30px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .error {
+            background: rgba(255,82,82,0.2);
+            border: 1px solid #ff5252;
+            padding: 14px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+
+        .schedule-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .schedule-info span { color: #00d4ff; font-weight: 600; }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+        }
+
+        .empty-state h3 { margin-bottom: 8px; color: #888; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>NCP 서버 관리</h1>
+            <p class="schedule-info">
+                업무 시간: <span id="work-hours">--:-- ~ --:--</span> |
+                현재: <span id="current-time">--:--:--</span>
+            </p>
+        </header>
+
+        <div class="status-cards">
+            <div class="card">
+                <h3>업무 상태</h3>
+                <div id="work-status"><span class="status-badge off">확인 중...</span></div>
+            </div>
+            <div class="card">
+                <h3>대상 서버</h3>
+                <div class="value" id="server-count">-</div>
+                <div style="font-size: 0.7rem; color: #888; margin-top: 4px;">AutoStop=true</div>
+            </div>
+            <div class="card">
+                <h3>API 상태</h3>
+                <div id="api-status"><span class="status-badge off">확인 중...</span></div>
+            </div>
+        </div>
+
+        <div class="server-section">
+            <div class="section-header">
+                <h2>VServer</h2>
+                <div class="btn-group">
+                    <button class="btn btn-start" onclick="startAllServers()">전체 시작</button>
+                    <button class="btn btn-stop" onclick="stopAllServers()">전체 중지</button>
+                    <div class="tooltip-container">
+                        <div class="custom-tooltip">현재 시간 규칙에 맞춰<br>서버를 <strong>시작</strong>하거나 <strong>중지</strong>합니다.</div>
+                        <button class="btn btn-sync" onclick="runScheduler()">동기화</button>
+                    </div>
+                    <div class="tooltip-container">
+                        <div id="refresh-tooltip" class="custom-tooltip">새로고침</div>
+                        <button id="btn-refresh" class="btn btn-refresh" onclick="refreshServers()">새로고침</button>
+                    </div>
+                </div>
+            </div>
+            <div id="server-container">
+                <div class="loading"><div class="spinner"></div><p>불러오는 중...</p></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let serverList = [];
+        let refreshTimer = null;
+
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                const info = data.work_time_info;
+                const start = `${String(info.start_hour).padStart(2, '0')}:${String(info.start_minute).padStart(2, '0')}`;
+                const end = `${String(info.end_hour).padStart(2, '0')}:${String(info.end_minute).padStart(2, '0')}`;
+                document.getElementById('work-hours').textContent = `${start} ~ ${end}`;
+
+                const workStatus = document.getElementById('work-status');
+                workStatus.innerHTML = info.is_work_time
+                    ? '<span class="status-badge work">업무중</span>'
+                    : '<span class="status-badge off">퇴근!</span>';
+
+                const apiStatus = document.getElementById('api-status');
+                apiStatus.innerHTML = data.api_configured
+                    ? '<span class="status-badge work">연결됨</span>'
+                    : '<span class="status-badge off">미설정</span>';
+            } catch (error) {
+                console.error('Status fetch error:', error);
+            }
+        }
+
+        function updateTime() {
+            document.getElementById('current-time').textContent = new Date().toTimeString().split(' ')[0];
+        }
+
+        async function refreshServers() {
+            if (refreshTimer) clearTimeout(refreshTimer);
+
+            const container = document.getElementById('server-container');
+            // 로딩 중 표시를 매번 하면 깜빡거리므로, 데이터가 없을 때만 표시
+            if (serverList.length === 0) {
+                container.innerHTML = '<div class="loading"><div class="spinner"></div><p>불러오는 중...</p></div>';
+            }
+
+            try {
+                const response = await fetch('/api/servers');
+                const data = await response.json();
+
+                if (data.getServerInstanceListResponse) {
+                    serverList = data.getServerInstanceListResponse.serverInstanceList || [];
+                    document.getElementById('server-count').textContent = serverList.length;
+                    renderServers();
+
+                    // 자동 갱신 로직: 작업 중인 서버가 있으면 10초마다 갱신, 안정화되면 중단
+                    const hasPending = serverList.some(s => {
+                        const statusClass = getStatusClass(s.serverInstanceStatus.code, s.serverInstanceOperation?.code);
+                        return statusClass === 'pending';
+                    });
+                    
+                    const refreshBtn = document.getElementById('btn-refresh');
+                    const tooltip = document.getElementById('refresh-tooltip');
+                    
+                    if (hasPending) {
+                        tooltip.innerHTML = "상태 변경 중...<br><strong>10초마다</strong> 자동으로 새로고침됩니다.";
+                        refreshBtn.innerHTML = '새로고침 <small style="font-size:0.6rem; opacity:0.7;">(자동...)</small>';
+                        refreshTimer = setTimeout(refreshServers, 10000);
+                    } else {
+                        tooltip.textContent = "새로고침";
+                        refreshBtn.innerHTML = '새로고침';
+                    }
+
+                } else {
+                    container.innerHTML = `<div class="error">오류: ${data.responseError?.returnMessage || '알 수 없는 오류'}</div>`;
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="error">연결 오류: ${error.message}</div>`;
+            }
+        }
+
+        function renderServers() {
+            const container = document.getElementById('server-container');
+
+            if (serverList.length === 0) {
+                container.innerHTML = '<div class="empty-state"><h3>서버가 없습니다</h3></div>';
+                return;
+            }
+
+            container.innerHTML = serverList.map(server => {
+                const statusCode = server.serverInstanceStatus.code;
+                const operationCode = server.serverInstanceOperation?.code;
+                const statusName = server.serverInstanceStatusName;
+
+                const statusClass = getStatusClass(statusCode, operationCode);
+                const statusText = getStatusText(statusCode, operationCode, statusName);
+                const isRunning = statusClass === 'running';
+                const isStopped = statusClass === 'stopped';
+                const isPending = statusClass === 'pending';
+
+                return `
+                    <div class="server-item">
+                        <div class="server-info">
+                            <div class="server-name">${server.serverName}</div>
+                            <div class="server-id">${server.serverInstanceNo}</div>
+                        </div>
+                        <div class="server-status">
+                            <span>${statusText}</span>
+                            <div class="status-dot ${statusClass}"></div>
+                            <button class="btn btn-start" onclick="startServer('${server.serverInstanceNo}')" ${isRunning || isPending ? 'disabled' : ''}>시작</button>
+                            <button class="btn btn-stop" onclick="stopServer('${server.serverInstanceNo}')" ${isStopped || isPending ? 'disabled' : ''}>중지</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function getStatusClass(statusCode, operationCode) {
+            // 작업 중인 경우
+            if (operationCode && operationCode !== 'NULL') {
+                return 'pending';
+            }
+            switch(statusCode) {
+                case 'RUN': return 'running';
+                case 'NSTOP': case 'STOP': return 'stopped';
+                default: return 'pending';
+            }
+        }
+
+        function getStatusText(statusCode, operationCode, statusName) {
+            // 작업 중인 경우 (SHTDN=정지중, STRT=시작중, REBOT=재시작중 등)
+            if (operationCode && operationCode !== 'NULL') {
+                const opTexts = {
+                    'SHTDN': '정지 중',
+                    'START': '시작 중',
+                    'REBOT': '재시작 중',
+                    'TERMT': '반납 중'
+                };
+                return opTexts[operationCode] || statusName || operationCode;
+            }
+            const texts = {
+                'RUN': '실행 중',
+                'NSTOP': '정지됨', 'STOP': '정지됨',
+                'INIT': '초기화 중', 'CREAT': '생성 중'
+            };
+            return texts[statusCode] || statusName || statusCode;
+        }
+
+        async function startServer(serverNo) {
+            try {
+                await fetch('/api/servers/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ server_instance_nos: [serverNo] })
+                });
+                setTimeout(refreshServers, 2000);
+            } catch (error) { alert('시작 실패: ' + error.message); }
+        }
+
+        async function stopServer(serverNo) {
+            try {
+                await fetch('/api/servers/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ server_instance_nos: [serverNo] })
+                });
+                setTimeout(refreshServers, 2000);
+            } catch (error) { alert('중지 실패: ' + error.message); }
+        }
+
+        async function startAllServers() {
+            const nos = serverList.map(s => s.serverInstanceNo);
+            if (nos.length === 0) return alert('서버가 없습니다.');
+            if (!confirm('모든 서버를 시작하시겠습니까?')) return;
+            try {
+                await fetch('/api/servers/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ server_instance_nos: nos })
+                });
+                setTimeout(refreshServers, 2000);
+            } catch (error) { alert('시작 실패: ' + error.message); }
+        }
+
+        async function stopAllServers() {
+            const nos = serverList.map(s => s.serverInstanceNo);
+            if (nos.length === 0) return alert('서버가 없습니다.');
+            if (!confirm('모든 서버를 중지하시겠습니까?')) return;
+            try {
+                await fetch('/api/servers/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ server_instance_nos: nos })
+                });
+                setTimeout(refreshServers, 2000);
+            } catch (error) { alert('중지 실패: ' + error.message); }
+        }
+
+        async function runScheduler() {
+            if (!confirm('현재 시간 규칙에 맞춰 서버 상태를 동기화하시겠습니까?')) return;
+            try {
+                const response = await fetch('/api/scheduler/run', { method: 'POST' });
+                if (response.ok) {
+                    alert('규칙 적용이 완료되었습니다.');
+                    refreshServers();
+                } else {
+                    const data = await response.json();
+                    alert('오류: ' + (data.detail || '알 수 없는 오류'));
+                }
+            } catch (error) {
+                alert('요청 실패: ' + error.message);
+            }
+        }
+
+        // Init
+        fetchStatus();
+        refreshServers();
+        setInterval(updateTime, 1000);
+        setInterval(fetchStatus, 60000);
+    </script>
+</body>
+</html>
