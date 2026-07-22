@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>설정 - NCP 서버 관리</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>설정</h1>
+            <p class="schedule-info">그룹·할당·자동화 설정을 관리합니다</p>
+            <div class="header-actions">
+                <a href="/" class="btn btn-settings">← 대시보드</a>
+            </div>
+        </header>
+
+        <div class="section accent-orange">
+            <div class="section-header">
+                <h2>자동화</h2>
+            </div>
+            <div class="toggle-row">
+                <div>
+                    <div class="toggle-label-main">업무 종료 시 서버 자동 중지</div>
+                    <div class="toggle-label-sub">끄면 업무 종료 시간이 되어도 서버를 중지하지 않습니다. (자동 시작은 계속 동작)</div>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="auto-stop-toggle" onchange="toggleAutoStop(this.checked)">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="section accent-purple">
+            <div class="section-header">
+                <h2>그룹별 업무 시간</h2>
+            </div>
+            <p class="section-desc">시간·주말 설정을 바꾼 뒤 반드시 <strong>저장</strong>을 눌러야 반영됩니다. 자정을 넘는 시간대(예: 22:00~06:00)는 지원하지 않습니다.</p>
+            <div id="group-container" class="group-grid">
+                <div class="loading"><div class="spinner"></div><p>불러오는 중...</p></div>
+            </div>
+        </div>
+
+        <div class="section accent-blue">
+            <div class="section-header">
+                <h2>서버 그룹 할당</h2>
+            </div>
+            <p class="section-desc">그룹에 할당된 서버만 자동 시작/중지 대상이 됩니다. 미할당 서버는 자동 관리에서 제외됩니다.</p>
+            <input type="text" id="server-search" class="search-input"
+                   placeholder="서버 이름 또는 인스턴스 번호로 검색..."
+                   oninput="onSearchInput(this.value)">
+            <div id="server-container">
+                <div class="loading"><div class="spinner"></div><p>불러오는 중...</p></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script>
+        let serverList = null;   // null = 아직 미로드
+        let groups = [];
+        let searchTerm = '';
+        const dirtyGroups = new Set();   // 수정 후 저장 안 된 그룹 id
+
+        function esc(str) {
+            return String(str ?? '').replace(/[&<>"']/g,
+                c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+
+        function pad(n) { return String(n).padStart(2, '0'); }
+
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type === 'success' ? '' : type}`.trim();
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), type === 'success' ? 3500 : 6500);
+        }
+
+        async function withBusy(btn, fn) {
+            if (!btn) return fn();
+            if (btn.disabled) return;
+            const orig = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '처리 중...';
+            try { await fn(); }
+            finally { btn.disabled = false; btn.innerHTML = orig; }
+        }
+
+        async function fetchStatus() {
+            try {
+                const response = await fetch('/api/status');
+                if (!response.ok) return;
+                const data = await response.json();
+                groups = data.groups || [];
+                document.getElementById('auto-stop-toggle').checked = !!data.auto_stop_enabled;
+                renderGroups();
+                renderServers();
+            } catch (error) {
+                console.error('Status fetch error:', error);
+            }
+        }
+
+        async function toggleAutoStop(enabled) {
+            try {
+                const response = await fetch('/api/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ auto_stop_enabled: enabled })
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    showToast('설정 변경 실패: ' + (data.detail || `HTTP ${response.status}`), 'error');
+                    document.getElementById('auto-stop-toggle').checked = !enabled;
+                    return;
+                }
+                showToast(enabled ? '자동 중지를 켰습니다.' : '자동 중지를 껐습니다. 업무 종료 시간에도 서버가 중지되지 않습니다.', enabled ? 'success' : 'warn');
+            } catch (error) {
+                showToast('설정 변경 실패: ' + error.message, 'error');
+                document.getElementById('auto-stop-toggle').checked = !enabled;
+            }
+        }
+
+        // ==================== 그룹 관리 ====================
+
+        function groupCardHTML(g) {
+            return `
+                <div class="group-card" data-group-card="${g.id}">
+                    <div class="group-card-header">
+                        <input type="text" id="g-name-${g.id}" value="${esc(g.name)}" maxlength="50">
+                        ${g.is_work_time
+                            ? '<span class="status-badge work">업무중</span>'
+                            : '<span class="status-badge idle">업무시간 외</span>'}
+                    </div>
+                    <div class="group-row">
+                        <input type="time" id="g-start-${g.id}" value="${pad(g.start_hour)}:${pad(g.start_minute)}">
+                        ~
+                        <input type="time" id="g-end-${g.id}" value="${pad(g.end_hour)}:${pad(g.end_minute)}">
+                        <label class="weekend-label">
+                            <input type="checkbox" id="g-weekend-${g.id}" ${g.include_weekends ? 'checked' : ''}>
+                            주말 포함
+                        </label>
+                    </div>
+                    <div class="group-footer">
+                        <span class="group-meta">할당 서버: <strong>${g.server_count}대</strong>
+                            <span class="dirty-badge">수정됨 — 저장 필요</span></span>
+                        <div class="btn-group">
+                            <button class="btn btn-save" onclick="saveGroup(${g.id}, this)">저장</button>
+                            <button class="btn btn-delete" onclick="deleteGroup(${g.id}, this)">삭제</button>
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        function addCardHTML() {
+            return `
+                <div class="group-card add-card" data-group-card="add">
+                    <div class="group-card-header">
+                        <input type="text" id="g-name-new" placeholder="새 그룹 이름" maxlength="50">
+                    </div>
+                    <div class="group-row">
+                        <input type="time" id="g-start-new" value="09:00">
+                        ~
+                        <input type="time" id="g-end-new" value="18:00">
+                        <label class="weekend-label">
+                            <input type="checkbox" id="g-weekend-new">
+                            주말 포함
+                        </label>
+                    </div>
+                    <div class="group-footer">
+                        <span class="group-meta">이름과 시간을 정하고 추가하세요</span>
+                        <button class="btn btn-add" onclick="addGroup(this)">+ 그룹 추가</button>
+                    </div>
+                </div>`;
+        }
+
+        function renderGroups() {
+            const container = document.getElementById('group-container');
+
+            // 편집 중(dirty) 카드와 추가 폼은 입력값 유지를 위해 기존 DOM을 그대로 재사용
+            const existing = {};
+            container.querySelectorAll('[data-group-card]').forEach(el => {
+                existing[el.dataset.groupCard] = el;
+            });
+
+            const frag = document.createDocumentFragment();
+            for (const g of groups) {
+                if (dirtyGroups.has(g.id) && existing[String(g.id)]) {
+                    frag.appendChild(existing[String(g.id)]);
+                } else {
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = groupCardHTML(g);
+                    frag.appendChild(tmp.firstElementChild);
+                }
+            }
+            if (existing['add']) {
+                frag.appendChild(existing['add']);
+            } else {
+                const tmp = document.createElement('div');
+                tmp.innerHTML = addCardHTML();
+                frag.appendChild(tmp.firstElementChild);
+            }
+            container.replaceChildren(frag);
+        }
+
+        // 그룹 카드 입력 변경 감지 → 미저장 표시 (추가 폼 제외)
+        document.getElementById('group-container').addEventListener('input', markDirty);
+        document.getElementById('group-container').addEventListener('change', markDirty);
+        function markDirty(e) {
+            const card = e.target.closest('[data-group-card]');
+            if (!card || card.dataset.groupCard === 'add') return;
+            dirtyGroups.add(Number(card.dataset.groupCard));
+            card.classList.add('dirty');
+        }
+
+        function readGroupFields(suffix) {
+            const name = document.getElementById(`g-name-${suffix}`).value.trim();
+            const start = document.getElementById(`g-start-${suffix}`).value;
+            const end = document.getElementById(`g-end-${suffix}`).value;
+            const weekend = document.getElementById(`g-weekend-${suffix}`).checked;
+
+            if (!name) { showToast('그룹 이름을 입력하세요.', 'warn'); return null; }
+            if (!start || !end) { showToast('시작/종료 시간을 입력하세요.', 'warn'); return null; }
+
+            const [sh, sm] = start.split(':').map(Number);
+            const [eh, em] = end.split(':').map(Number);
+
+            if (sh * 60 + sm >= eh * 60 + em) {
+                showToast('종료 시간이 시작 시간보다 늦어야 합니다.\n(자정을 넘는 시간대는 지원하지 않습니다)', 'warn');
+                return null;
+            }
+
+            return {
+                name: name,
+                start_hour: sh, start_minute: sm,
+                end_hour: eh, end_minute: em,
+                include_weekends: weekend
+            };
+        }
+
+        async function saveGroup(id, btn) {
+            const body = readGroupFields(id);
+            if (!body) return;
+
+            await withBusy(btn, async () => {
+                try {
+                    const response = await fetch(`/api/groups/${id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
+                    if (!response.ok) {
+                        const data = await response.json().catch(() => ({}));
+                        showToast('저장 실패: ' + (data.detail?.[0]?.msg || data.detail || `HTTP ${response.status}`), 'error');
+                        return;
+                    }
+                    dirtyGroups.delete(id);
+                    showToast(`'${body.name}' 그룹 저장됨 (${pad(body.start_hour)}:${pad(body.start_minute)} ~ ${pad(body.end_hour)}:${pad(body.end_minute)})`);
+                    await fetchStatus();
+                } catch (error) { showToast('저장 실패: ' + error.message, 'error'); }
+            });
+        }
+
+        async function addGroup(btn) {
+            const body = readGroupFields('new');
+            if (!body) return;
+
+            await withBusy(btn, async () => {
+                try {
+                    const response = await fetch('/api/groups', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
+                    });
+                    if (!response.ok) {
+                        const data = await response.json().catch(() => ({}));
+                        showToast('추가 실패: ' + (data.detail?.[0]?.msg || data.detail || `HTTP ${response.status}`), 'error');
+                        return;
+                    }
+                    showToast(`'${body.name}' 그룹이 추가되었습니다.`);
+                    // 추가 폼 초기화
+                    document.getElementById('g-name-new').value = '';
+                    document.getElementById('g-start-new').value = '09:00';
+                    document.getElementById('g-end-new').value = '18:00';
+                    document.getElementById('g-weekend-new').checked = false;
+                    await fetchStatus();
+                } catch (error) { showToast('추가 실패: ' + error.message, 'error'); }
+            });
+        }
+
+        async function deleteGroup(id, btn) {
+            const group = groups.find(g => g.id === id);
+            const label = group ? group.name : id;
+            if (!confirm(`'${label}' 그룹을 삭제하시겠습니까?\n할당된 서버는 미할당 상태가 되어 자동 관리에서 제외됩니다.`)) return;
+
+            await withBusy(btn, async () => {
+                try {
+                    const response = await fetch(`/api/groups/${id}`, { method: 'DELETE' });
+                    if (!response.ok) {
+                        const data = await response.json().catch(() => ({}));
+                        showToast('삭제 실패: ' + (data.detail || `HTTP ${response.status}`), 'error');
+                        return;
+                    }
+                    dirtyGroups.delete(id);
+                    showToast(`'${label}' 그룹이 삭제되었습니다.`);
+                    await refreshServers();
+                    await fetchStatus();
+                } catch (error) { showToast('삭제 실패: ' + error.message, 'error'); }
+            });
+        }
+
+        // ==================== 서버 할당 ====================
+
+        function onSearchInput(value) {
+            searchTerm = value.trim().toLowerCase();
+            renderServers();
+        }
+
+        async function refreshServers() {
+            const container = document.getElementById('server-container');
+
+            try {
+                const response = await fetch('/api/servers');
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    container.innerHTML = `<div class="error">서버 목록 조회 실패: ${esc(data.detail || `HTTP ${response.status}`)}</div>`;
+                    return;
+                }
+                const data = await response.json();
+                serverList = data.getServerInstanceListResponse.serverInstanceList || [];
+                renderServers();
+            } catch (error) {
+                container.innerHTML = `<div class="error">연결 오류: ${esc(error.message)}</div>`;
+            }
+        }
+
+        function renderServers() {
+            const container = document.getElementById('server-container');
+            if (serverList === null) return;   // 아직 로드 전이면 로딩 표시 유지
+
+            if (serverList.length === 0) {
+                container.innerHTML = '<div class="empty-state"><h3>서버가 없습니다</h3></div>';
+                return;
+            }
+
+            const filtered = searchTerm
+                ? serverList.filter(s =>
+                    (s.serverName || '').toLowerCase().includes(searchTerm) ||
+                    String(s.serverInstanceNo || '').includes(searchTerm))
+                : serverList;
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="empty-state"><h3>검색 결과가 없습니다</h3></div>';
+                return;
+            }
+
+            container.innerHTML = filtered.map(server => {
+                const options = ['<option value="">미할당</option>']
+                    .concat(groups.map(g =>
+                        `<option value="${g.id}" ${server.groupId === g.id ? 'selected' : ''}>${esc(g.name)}</option>`
+                    )).join('');
+
+                return `
+                    <div class="server-item">
+                        <div class="server-info">
+                            <div class="server-name">${esc(server.serverName)}</div>
+                            <div class="server-id">${esc(server.serverInstanceNo)}</div>
+                        </div>
+                        <div class="server-status">
+                            <select class="group-select ${server.groupId == null ? 'unassigned' : ''}"
+                                    data-no="${esc(server.serverInstanceNo)}">
+                                ${options}
+                            </select>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 그룹 할당 드롭다운: 이벤트 위임 (인라인 핸들러의 JS 문자열 이스케이프 문제 회피)
+        document.getElementById('server-container').addEventListener('change', (e) => {
+            const select = e.target.closest('select.group-select');
+            if (!select) return;
+            assignGroup(select.dataset.no, select.value);
+        });
+
+        async function assignGroup(serverNo, groupIdValue) {
+            const groupId = groupIdValue === '' ? null : Number(groupIdValue);
+            try {
+                const response = await fetch(`/api/servers/${serverNo}/group`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ group_id: groupId })
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    showToast('할당 실패: ' + (data.detail || `HTTP ${response.status}`), 'error');
+                    // 실패한 할당이 화면에 남지 않도록 서버 기준으로 복원
+                    await refreshServers();
+                    return;
+                }
+                const server = serverList.find(s => s.serverInstanceNo === serverNo);
+                if (server) server.groupId = groupId;
+                const groupName = groupId == null ? null : groups.find(g => g.id === groupId)?.name;
+                const serverName = server?.serverName || serverNo;
+                showToast(groupId == null
+                    ? `'${serverName}' 할당 해제됨 (자동 관리 제외)`
+                    : `'${serverName}' → '${groupName}' 그룹에 할당됨`);
+                await fetchStatus();
+            } catch (error) {
+                showToast('할당 실패: ' + error.message, 'error');
+                await refreshServers();
+            }
+        }
+
+        // Init
+        (async () => {
+            await fetchStatus();
+            await refreshServers();
+        })();
+    </script>
+</body>
+</html>
