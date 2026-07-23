@@ -79,6 +79,11 @@ jobs:
         run: |
           # image: <registry>/<project>/<IMAGE_NAME>:<tag> 라인의 태그만 교체
           sed -i -E "s|(image:[[:space:]]*[^[:space:]]+/${IMAGE_NAME}):[^[:space:]]+|\1:${SHORT_SHA}|" "$MANIFEST_PATH"
+          # 교체 검증: sed 미탐(파일 형식 변경 등)이 '변경 없음'으로 위장되는 것 방지
+          if ! grep -q "/${IMAGE_NAME}:${SHORT_SHA}" "$MANIFEST_PATH"; then
+            echo "::error::이미지 태그 교체 실패 - ${MANIFEST_PATH}의 image 라인 형식을 확인하세요"
+            exit 1
+          fi
           if git diff --quiet; then
             echo "::notice::이미지 태그 변경 없음 (이미 ${SHORT_SHA})"
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -94,4 +99,12 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$MANIFEST_PATH"
           git commit -m "deploy: ${IMAGE_NAME} ${SHORT_SHA} (Sandman CI)"
-          git push
+          # 경합(동시 커밋) 시 rebase 후 재시도 - 이미지만 있고 deploy 커밋이 누락되는 것 방지
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          for i in 1 2 3; do
+            if git push origin "$BRANCH"; then exit 0; fi
+            echo "push 실패 (${i}/3) - rebase 후 재시도"
+            git pull --rebase origin "$BRANCH"
+          done
+          echo "::error::매니페스트 push 3회 실패"
+          exit 1
