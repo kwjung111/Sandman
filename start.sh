@@ -3,7 +3,7 @@
 #
 # env 파일 예시 (권장 권한: chmod 600):
 #   # --- 컨테이너 설정 (스크립트가 읽음) ---
-#   IMAGE=<your-registry>/tools/ncp-server-manager:latest
+#   IMAGE=<your-registry>/<project>/ncp-server-manager:latest
 #   HOST_PORT=18081
 #   DATA_DIR=/data/ncp/data    # SQLite 저장 위치 (기본값, 바꿀 때만 지정)
 #   # --- 앱 설정 (컨테이너로 전달됨) ---
