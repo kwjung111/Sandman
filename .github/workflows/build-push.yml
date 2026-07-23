@@ -16,6 +16,7 @@ jobs:
     env:
       REGISTRY: ${{ vars.HARBOR_REGISTRY }}
       PROJECT: ${{ vars.HARBOR_PROJECT }}
+      IMAGE_NAME: ${{ vars.IMAGE_NAME || 'ncp-server-manager' }}
     steps:
       - uses: actions/checkout@v4
 

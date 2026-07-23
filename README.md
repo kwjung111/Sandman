@@ -4,51 +4,43 @@
 
 ## 주요 기능
 
-- **정밀한 스케줄링**: 업무 시작/종료 시간을 **시(Hour)와 분(Minute)** 단위로 설정 가능
-- **이름 기반 필터링**: `SERVER_NAME_FILTER`를 통해 특정 서버만 관리 (또는 제외)
+- **그룹별 스케줄링**: 그룹마다 업무 시작/종료 시간을 **시(Hour)와 분(Minute)** 단위로 설정, 서버를 그룹에 할당해 관리
+- **주말 운영 정책**: 그룹별로 "업무 시간 적용" 또는 "주말 전체 중지" 선택 (전체 중지 시 토·일 매시 정각 자동 중지)
+- **이름 기반 필터링**: `SERVER_NAME_FILTER`/`SERVER_NAME_EXCLUDE`로 관리 대상 서버 제한
 - **동기화 기능**: 버튼 하나로 현재 시간 규칙에 맞춰 서버 상태 즉시 동기화
-- **실시간 모니터링**: 10초 간격 자동 새로고침(상태 변경 시) 및 커스텀 툴팁 제공
-- **보안 강화**: 서버에 `.env` 파일 없이 실행 인자로 인증키 전달 가능 (Docker)
+- **실시간 모니터링**: 서버 상태 변경 중 10초 간격 자동 새로고침, 규칙-실제 상태 불일치 표시
 
-## 설치 및 배포
+## CI/CD (GitHub Actions)
 
-### 1. 로컬 빌드 (Windows)
-프로젝트 폴더에서 `build_release.bat`를 실행하여 도커 이미지와 배포용 파일을 생성합니다.
-- 결과물: `ncp-server-manager.tar`
+`main` 브랜치에 푸시하면 [.github/workflows/build-push.yml](.github/workflows/build-push.yml)이
+이미지를 빌드해 레지스트리로 푸시합니다 (태그: git short SHA + `latest`).
 
-### 2. 서버 배포 (Linux)
-생성된 `.tar` 파일과 `start.sh` 스크립트를 서버로 복사한 후 실행합니다.
+저장소 Settings → Secrets and variables → Actions 에서 설정:
+
+| 위치 | 이름 | 설명 |
+|------|------|------|
+| Variables | `HARBOR_REGISTRY` | 레지스트리 주소 (예: `harbor.example.com`) |
+| Variables | `HARBOR_PROJECT` | 레지스트리 프로젝트명 (예: `tools`) |
+| Variables | `IMAGE_NAME` | (선택) 이미지 이름, 기본 `ncp-server-manager` |
+| Secrets | `HARBOR_ROBOT_USER` | 로봇 계정명 (push/pull 권한만 부여 권장) |
+| Secrets | `HARBOR_ROBOT_SECRET` | 로봇 계정 시크릿 |
+
+> 변수 미설정 시(포크 등) 푸시 없이 빌드 검증만 수행합니다.
+
+## 서버 배포 (Linux)
 
 ```bash
-# 이미지 로드
-docker load -i ncp-server-manager.tar
-
-# 컨테이너 실행 (.env 파일에 인증키 준비 후)
+# .env 파일에 이미지·인증키 준비 (권장 권한 600)
 cp .env.example .env && chmod 600 .env && vi .env
+
 chmod +x start.sh
 ./start.sh          # 기본 .env 사용, 다른 파일이면 ./start.sh /path/to/env
-
-# 레지스트리 이미지로 실행하려면
-IMAGE=<registry>/<project>/ncp-server-manager:latest ./start.sh
 ```
 
-## 사내 레지스트리(Harbor) 빌드 & 푸시
+`start.sh`는 레지스트리 이미지면 자동으로 pull 후 기존 컨테이너를 교체하며,
+SQLite 데이터는 호스트 `/data/ncp/data`(변경: `DATA_DIR`)에 저장되어 재배포에도 유지됩니다.
 
-레지스트리 주소는 하드코딩하지 않고 `build.env`(git 제외)에서 읽는다:
-
-```bash
-cp build.env.example build.env   # REGISTRY, REGISTRY_PROJECT 등 채우기
-docker login <registry>          # 최초 1회
-
-# Windows
-.\build_push.ps1                 # 빌드 + 푸시 (태그: git short hash + latest)
-.\build_push.ps1 -NoPush         # 빌드만
-.\build_push.ps1 -Tag v1.2.0     # 태그 지정
-
-# Linux/macOS
-./build_push.sh
-TAG=v1.2.0 ./build_push.sh
-```
+로컬에서 직접 빌드하려면: `docker build -t ncp-server-manager .`
 
 ## 환경 변수 설정 (.env 또는 Docker -e)
 
@@ -60,6 +52,9 @@ TAG=v1.2.0 ./build_push.sh
 | `SERVER_NAME_EXCLUDE` | "" | 제외할 서버 이름 (쉼표 구분) |
 | `NCP_API_URL` | (공공) | NCP API 엔드포인트 URL |
 | `DB_PATH` | data/app.db | SQLite DB 파일 경로 |
+| `IMAGE` | ncp-server-manager | (start.sh) 실행할 이미지 |
+| `HOST_PORT` | 18081 | (start.sh) 호스트 포트 |
+| `DATA_DIR` | /data/ncp/data | (start.sh) SQLite 저장 디렉토리 |
 
 > 업무 시간·주말 포함 여부는 env가 아니라 **대시보드 설정 화면**에서 그룹별로 관리합니다 (SQLite 저장).
 > 최초 실행 시 "기본 그룹"(09:00~18:00, 주말 제외)이 자동 생성됩니다.
