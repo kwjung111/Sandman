@@ -139,9 +139,22 @@
                         <input type="time" id="g-start-${g.id}" value="${pad(g.start_hour)}:${pad(g.start_minute)}">
                         ~
                         <input type="time" id="g-end-${g.id}" value="${pad(g.end_hour)}:${pad(g.end_minute)}">
-                        <label class="weekend-label">
-                            <input type="checkbox" id="g-weekend-${g.id}" ${g.include_weekends ? 'checked' : ''}>
-                            주말 포함
+                    </div>
+                    <div class="weekend-policy">
+                        <div class="policy-title">주말 운영 정책</div>
+                        <label class="radio-option">
+                            <input type="radio" name="g-weekend-${g.id}" value="work" ${g.include_weekends ? 'checked' : ''}>
+                            <span class="radio-text">
+                                <strong>업무 시간 적용</strong>
+                                <small>주말에도 설정된 업무 시간에 서버를 스케줄링합니다.</small>
+                            </span>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="g-weekend-${g.id}" value="stop" ${g.include_weekends ? '' : 'checked'}>
+                            <span class="radio-text">
+                                <strong>주말 전체 중지</strong>
+                                <small>토요일과 일요일에는 서버를 항상 중지합니다.</small>
+                            </span>
                         </label>
                     </div>
                     <div class="group-footer">
@@ -165,9 +178,22 @@
                         <input type="time" id="g-start-new" value="09:00">
                         ~
                         <input type="time" id="g-end-new" value="18:00">
-                        <label class="weekend-label">
-                            <input type="checkbox" id="g-weekend-new">
-                            주말 포함
+                    </div>
+                    <div class="weekend-policy">
+                        <div class="policy-title">주말 운영 정책</div>
+                        <label class="radio-option">
+                            <input type="radio" name="g-weekend-new" value="work">
+                            <span class="radio-text">
+                                <strong>업무 시간 적용</strong>
+                                <small>주말에도 설정된 업무 시간에 서버를 스케줄링합니다.</small>
+                            </span>
+                        </label>
+                        <label class="radio-option">
+                            <input type="radio" name="g-weekend-new" value="stop" checked>
+                            <span class="radio-text">
+                                <strong>주말 전체 중지</strong>
+                                <small>토요일과 일요일에는 서버를 항상 중지합니다.</small>
+                            </span>
                         </label>
                     </div>
                     <div class="group-footer">
@@ -220,7 +246,7 @@
             const name = document.getElementById(`g-name-${suffix}`).value.trim();
             const start = document.getElementById(`g-start-${suffix}`).value;
             const end = document.getElementById(`g-end-${suffix}`).value;
-            const weekend = document.getElementById(`g-weekend-${suffix}`).checked;
+            const weekend = document.querySelector(`input[name="g-weekend-${suffix}"]:checked`)?.value === 'work';
 
             if (!name) { showToast('그룹 이름을 입력하세요.', 'warn'); return null; }
             if (!start || !end) { showToast('시작/종료 시간을 입력하세요.', 'warn'); return null; }

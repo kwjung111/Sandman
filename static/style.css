@@ -198,6 +198,44 @@ header h1 {
     user-select: none;
 }
 
+/* 주말 운영 정책 라디오 */
+.weekend-policy {
+    margin-bottom: 10px;
+}
+
+.weekend-policy .policy-title {
+    font-size: 0.78rem;
+    color: #888;
+    margin-bottom: 6px;
+    text-transform: none;
+}
+
+.radio-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 7px 10px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+    margin-bottom: 6px;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.radio-option:hover { background: rgba(255,255,255,0.04); }
+
+.radio-option:has(input:checked) {
+    border-color: rgba(123,44,191,0.7);
+    background: rgba(123,44,191,0.1);
+}
+
+.radio-option input { margin-top: 3px; accent-color: #9d4edd; }
+
+.radio-option .radio-text { display: flex; flex-direction: column; gap: 2px; }
+.radio-option .radio-text strong { font-size: 0.85rem; }
+.radio-option .radio-text small { font-size: 0.75rem; color: #999; line-height: 1.4; }
+
 /* 서버 검색 */
 .search-input {
     width: 100%;

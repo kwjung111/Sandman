@@ -196,7 +196,7 @@
                     </div>
                     <div class="group-row">
                         🕒 ${pad(g.start_hour)}:${pad(g.start_minute)} ~ ${pad(g.end_hour)}:${pad(g.end_minute)}
-                        · 주말 ${g.include_weekends ? '포함' : '제외'}
+                        · 주말 ${g.include_weekends ? '업무시간 적용' : '전체 중지'}
                     </div>
                     <div class="group-meta">할당 서버: <strong>${g.server_count}대</strong></div>
                 </div>
@@ -339,12 +339,27 @@
             }).join('');
         }
 
+        // 주말 + '주말 전체 중지' 그룹 서버를 수동 시작할 때 경고
+        function confirmWeekendStart(serverNo) {
+            const day = new Date().getDay();   // 0=일, 6=토
+            if (day !== 0 && day !== 6) return true;
+            const server = (serverList || []).find(s => s.serverInstanceNo === serverNo);
+            const group = groups.find(g => g.id === server?.groupId);
+            if (!group || group.include_weekends) return true;
+            if (!autoStopEnabled) return true;   // 자동 중지 꺼짐이면 스위프도 안 도니 경고 불필요
+            return confirm(
+                `'${group.name}' 그룹은 주말 전체 중지 정책입니다.\n` +
+                `지금 시작해도 매시 정각 자동 중지에서 다시 꺼집니다.\n` +
+                `(주말 작업이 필요하면 설정에서 자동 중지를 잠시 끄세요)\n\n계속하시겠습니까?`);
+        }
+
         // 서버별 시작/중지 버튼: 이벤트 위임 (인라인 onclick의 JS 문자열 이스케이프 문제 회피)
         document.getElementById('server-container').addEventListener('click', (e) => {
             const btn = e.target.closest('button[data-action]');
             if (!btn || btn.disabled) return;
             const no = btn.dataset.no;
             const action = btn.dataset.action;
+            if (action === 'start' && !confirmWeekendStart(no)) return;
             withBusy(btn, () => action === 'start' ? startServer(no) : stopServer(no));
         });
 

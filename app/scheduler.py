@@ -111,11 +111,49 @@ async def auto_start_group(group_id: int, attempt: int = 1):
         logger.exception(f"[Scheduler] '{group['name']}' 시작 프로세스 오류: {e}")
 
 
+async def weekend_stop_sweep():
+    """주말 스위프: '주말 전체 중지'(include_weekends=0) 그룹의 실행 중 서버를 매시 정각에 중지.
+
+    주말 정책이 '항상 중지'이므로, 수동으로 켠 서버도 다음 스위프에서 다시 꺼진다.
+    실패해도 별도 재시도 없음 — 1시간 뒤 다음 스위프가 자연 재시도 역할을 한다.
+    """
+    if not is_weekend():
+        return
+
+    if not db.auto_stop_enabled():
+        logger.info("[Scheduler] 자동 중지 기능이 꺼져 있어 주말 스위프를 건너뜁니다.")
+        return
+
+    stop_group_ids = {g["id"]: g["name"] for g in db.list_groups() if not g["include_weekends"]}
+    if not stop_group_ids:
+        return
+
+    try:
+        result = await ncp_client.get_server_list()
+        server_list = result["getServerInstanceListResponse"]["serverInstanceList"]
+        assignments = db.get_assignments()
+
+        targets = [s["serverInstanceNo"] for s in server_list
+                   if assignments.get(s["serverInstanceNo"]) in stop_group_ids
+                   and s["serverInstanceStatus"]["code"] == "RUN"]
+
+        if targets:
+            logger.info(f"[Scheduler] 주말 전체 중지 스위프 - 서버 중지: {targets}")
+            await ncp_client.stop_server(targets)
+        else:
+            logger.debug("[Scheduler] 주말 스위프 - 중지할 서버 없음")
+
+    except NCPApiError as e:
+        logger.error(f"[Scheduler] 주말 스위프 NCP API 오류 (다음 정각에 재시도됨): {e}")
+    except Exception as e:
+        logger.exception(f"[Scheduler] 주말 스위프 오류: {e}")
+
+
 async def auto_stop_group(group_id: int, attempt: int = 1):
     """그룹 업무 종료 시간: 해당 그룹 서버 자동 중지 (실패 시 재시도)
 
-    주말 여부와 무관하게 수행한다 — '주말 제외'는 주말에 시작하지 않는다는 의미이고,
-    주말에 수동으로 켠 서버라도 종료 시각이 되면 꺼져야 비용 절감 목적에 맞는다.
+    주말 여부와 무관하게 수행한다 — 주말에 수동으로 켠 서버라도
+    종료 시각이 되면 꺼져야 비용 절감 목적에 맞는다.
     """
     group = db.get_group(group_id)
     if not group:
@@ -222,10 +260,18 @@ def reschedule_jobs():
 
 
 def start_scheduler():
-    """스케줄러 시작 - 그룹별 시작/종료 시간에 트리거"""
+    """스케줄러 시작 - 그룹별 시작/종료 시간 트리거 + 주말 스위프"""
     scheduler.start()
     reschedule_jobs()
-    logger.info("[Scheduler] 스케줄러 시작됨")
+    # 주말(토·일) 매시 정각: '주말 전체 중지' 그룹의 실행 중 서버 중지
+    # (id가 group_ 로 시작하지 않으므로 reschedule_jobs()의 영향을 받지 않음)
+    scheduler.add_job(
+        weekend_stop_sweep, "cron",
+        day_of_week="sat,sun", minute=0,
+        id="weekend_sweep", replace_existing=True,
+        misfire_grace_time=MISFIRE_GRACE_SEC,
+    )
+    logger.info("[Scheduler] 스케줄러 시작됨 (주말 스위프 포함)")
 
 
 def stop_scheduler():
