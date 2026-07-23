@@ -19,14 +19,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Short SHA
-        id: sha
-        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - name: Resolve tags
+        id: meta
+        run: |
+          SHORT="${GITHUB_SHA::7}"
+          if [ -n "$REGISTRY" ] && [ -n "$PROJECT" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+            echo "tags=$REGISTRY/$PROJECT/ncp-server-manager:latest,$REGISTRY/$PROJECT/ncp-server-manager:$SHORT" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::HARBOR_REGISTRY/HARBOR_PROJECT 변수 미설정 - 빌드 검증만 수행 (푸시 생략)"
+            echo "push=false" >> "$GITHUB_OUTPUT"
+            echo "tags=ncp-server-manager:ci" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
-        if: env.REGISTRY != ''
+        if: steps.meta.outputs.push == 'true'
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.HARBOR_ROBOT_USER }}
@@ -35,9 +44,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ env.REGISTRY != '' }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.PROJECT }}/ncp-server-manager:latest
-            ${{ env.REGISTRY }}/${{ env.PROJECT }}/ncp-server-manager:${{ steps.sha.outputs.short }}
+          push: ${{ steps.meta.outputs.push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
