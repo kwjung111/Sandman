@@ -1,6 +1,11 @@
 __pycache__
 *.pyc
 .env
+.env.local
+data
+nul
+.claude
+.github
 .git
 .gitignore
 venv
