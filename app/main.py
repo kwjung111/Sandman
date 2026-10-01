@@ -1,6 +1,6 @@
 import sqlite3
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, model_validator
@@ -20,6 +20,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="NCP 서버 관리 대시보드", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.middleware("http")
+async def add_cache_control_headers(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+
+    if path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    elif path in {"/", "/settings"} or path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, max-age=0, must-revalidate"
+
+    return response
 
 
 class ServerActionRequest(BaseModel):
